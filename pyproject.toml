@@ -10,6 +10,7 @@ dependencies = [
     "matplotlib",
     "pillow",
     "numpy",
+    "yt-dlp",
 ]
 
 [project.optional-dependencies]
