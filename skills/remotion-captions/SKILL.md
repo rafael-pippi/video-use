@@ -5,13 +5,29 @@ description: Cut every speech gap out of a video and burn animated word-level ca
 
 # Remotion Captions (silence-cut + animated captions)
 
-Vendored sub-skill of `video-use`. Use it when the user wants the classic
-short-form treatment: **remove all pauses** and **burn animated, word-synced
-captions** rendered with [Remotion](https://www.remotion.dev/docs/ai/skills).
+Use this when the user wants the classic short-form treatment: **remove all
+pauses** and **burn animated, word-synced captions** rendered with
+[Remotion](https://www.remotion.dev/docs/ai/skills).
 
-Everything inherits the video-use Hard Rules: never cut inside a word,
-30–200ms edge padding, 30ms audio fades, lossless concat, output-timeline
-timestamp remapping.
+Ships as a vendored sub-skill of [`video-use`](https://github.com/browser-use/video-use)
+but is fully standalone — everything it needs (silence cutter, local
+transcription fallback, Remotion template) lives in this folder.
+
+Production-correctness rules (inherited from video-use, non-negotiable):
+never cut inside a word, 30–200ms edge padding, 30ms audio fades at every
+cut, lossless concat, output-timeline timestamp remapping.
+
+## Install
+
+- **Claude Code (local)**: symlink or copy this folder into your skills dir —
+  `ln -sfn /path/to/remotion-captions ~/.claude/skills/remotion-captions`
+- **Claude web (claude.ai)**: upload the skill as a `.zip` (this folder at the
+  zip root, `SKILL.md` inside it) under Settings → Capabilities → Skills.
+- **Requirements** on the machine that runs the pipeline: `ffmpeg`/`ffprobe`,
+  Node.js 18+ (Remotion + whisper.cpp fallback), Python 3.10+ (silence
+  cutter, stdlib only). Optional: `yt-dlp` to download source videos,
+  `ELEVENLABS_API_KEY` for hosted transcription (better word timestamps than
+  the local whisper fallback).
 
 ## Pipeline
 
