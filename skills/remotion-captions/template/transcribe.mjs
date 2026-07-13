@@ -73,6 +73,7 @@ const whisperCppOutput = await transcribe({
   whisperCppVersion: WHISPER_VERSION,
   inputPath: wav,
   tokenLevelTimestamps: true,
+  splitOnWord: true,
   language,
 });
 rmSync(wav, {force: true});

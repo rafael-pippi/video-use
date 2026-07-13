@@ -1,13 +1,13 @@
-import {loadFont as loadInter} from '@remotion/google-fonts/Inter';
-import {loadFont as loadPlayfair} from '@remotion/google-fonts/PlayfairDisplay';
+// Bundled fonts (@fontsource) — no network needed at render time, which
+// matters in sandboxed/proxied environments where headless Chrome can't
+// reach Google Fonts.
+import '@fontsource/inter/700.css';
+import '@fontsource/inter/800.css';
+import '@fontsource/inter/900.css';
+import '@fontsource/playfair-display/700-italic.css';
+import '@fontsource/playfair-display/800-italic.css';
 
-export const inter = loadInter('normal', {
-  weights: ['700', '800', '900'],
-  subsets: ['latin', 'latin-ext'],
-});
+export const inter = {fontFamily: 'Inter'};
 
 // Contrast font for the keyword-highlight style.
-export const playfair = loadPlayfair('italic', {
-  weights: ['700', '800'],
-  subsets: ['latin', 'latin-ext'],
-});
+export const playfair = {fontFamily: '"Playfair Display"'};

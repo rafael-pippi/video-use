@@ -7,9 +7,10 @@
     "render": "remotion render"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.0.0",
+    "@fontsource/playfair-display": "^5.0.0",
     "@remotion/captions": "^4.0.0",
     "@remotion/cli": "^4.0.0",
-    "@remotion/google-fonts": "^4.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "remotion": "^4.0.0"

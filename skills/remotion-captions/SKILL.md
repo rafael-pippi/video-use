@@ -85,10 +85,10 @@ per page depending on style, breaking early on sentence punctuation or gaps
 ## Customizing (artistic freedom applies)
 
 - **Accent color**: `--props='{"accent":"#00E5FF"}'` — no rebuild needed.
-- **Fonts**: `src/fonts.ts` loads Inter + Playfair Display via
-  `@remotion/google-fonts` (needs network at render time). Swap for any other
-  `@remotion/google-fonts/<Font>` import, or `@remotion/fonts` + a file in
-  `public/` for offline renders.
+- **Fonts**: `src/fonts.ts` bundles Inter + Playfair Display via `@fontsource`
+  packages — no network at render time (headless Chrome often can't reach
+  Google Fonts through sandbox proxies). Swap by installing another
+  `@fontsource/<font>` and changing the imports + family names there.
 - **Placement**: `src/CaptionContainer.tsx`. Vertical videos keep captions
   ~30% up from the bottom — that is a platform safe-zone rule (Reels/TikTok
   UI), not taste. Do not go below ~25% on vertical without a reason.
