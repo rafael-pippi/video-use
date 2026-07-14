@@ -4,9 +4,13 @@ Transcript-aware silence cutting for the remotion-captions skill:
 
   1. Read a word-level transcript (ElevenLabs Scribe JSON, the Scribe-like
      JSON written by template/transcribe.mjs, or a Remotion Caption[] array).
-  2. Group words into speech segments wherever the inter-word gap is below
-     --gap seconds. Pad each segment edge (Hard Rule 7: 30-200ms window),
-     never cutting inside a word (Hard Rule 6).
+  2. Find cut candidates from BOTH signals and union them: inter-word gaps
+     >= --gap seconds in the transcript AND audio silences from ffmpeg
+     silencedetect (whisper.cpp tiles token timestamps across pauses, so
+     transcript gaps alone under-detect; silencedetect alone fails under
+     music beds — the union covers both). Every cut region is clipped to
+     word boundaries (Hard Rule 6: never cut inside a word) and shrunk by
+     the edge pads (Hard Rule 7: 30-200ms window).
   3. Extract each segment with 30ms audio fades (Hard Rule 3), lossless
      -c copy concat (Hard Rule 2) -> cut.mp4.
   4. Remap every word to the output timeline (Hard Rule 5:
@@ -82,40 +86,137 @@ def load_words(transcript_path: Path) -> list[dict]:
     return words
 
 
+def detect_silences(video: Path, noise_db: float, min_silence: float) -> list[list[float]]:
+    """Audio silences via ffmpeg silencedetect. Returns [[start, end], ...]."""
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(video),
+         "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}",
+         "-vn", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    silences: list[list[float]] = []
+    start = None
+    for line in proc.stderr.splitlines():
+        if "silence_start:" in line:
+            start = float(line.rsplit("silence_start:", 1)[1].split("|")[0])
+        elif "silence_end:" in line and start is not None:
+            end = float(line.rsplit("silence_end:", 1)[1].split("|")[0])
+            silences.append([start, end])
+            start = None
+    return silences
+
+
+def repair_word_timestamps(words: list[dict], silences: list[list[float]]) -> list[dict]:
+    """Snap word spans out of audio-verified silences.
+
+    whisper.cpp tiles token timestamps wall-to-wall, so a word 'claims' the
+    pause around it (e.g. a 2.3s span for a 0.3s word). Physics wins: a
+    silencedetect interval contains no speech, so any word overlap is
+    timestamp drift. Keep the largest non-silent piece of each word's span.
+    Words with no non-silent piece (hallucinated/breath tokens) keep their
+    original span. Scribe timestamps are barely affected (drift < pads).
+    """
+    if not silences:
+        return words
+    repaired: list[dict] = []
+    for w in words:
+        pieces = [[w["start"], w["end"]]]
+        for s, e in silences:
+            if e <= w["start"] or s >= w["end"]:
+                continue
+            nxt = []
+            for p in pieces:
+                if e <= p[0] or s >= p[1]:
+                    nxt.append(p)
+                    continue
+                if p[0] < s:
+                    nxt.append([p[0], s])
+                if e < p[1]:
+                    nxt.append([e, p[1]])
+            pieces = nxt
+        pieces = [p for p in pieces if p[1] - p[0] > 0.02]
+        if pieces:
+            best = max(pieces, key=lambda p: p[1] - p[0])
+            repaired.append({**w, "start": best[0], "end": best[1]})
+        else:
+            repaired.append(dict(w))
+    repaired.sort(key=lambda w: w["start"])
+    return repaired
+
+
 def build_segments(
     words: list[dict],
     duration: float,
     gap: float,
     pad_before: float,
     pad_after: float,
+    silences: list[list[float]] | None = None,
+    min_cut: float = 0.2,
 ) -> list[dict]:
-    """Group words into padded keep-ranges. Merge ranges that (after padding)
-    touch or leave a sliver smaller than 120ms — a cut that small is not
-    worth the boundary risk."""
-    groups: list[list[dict]] = []
-    current = [words[0]]
-    for w in words[1:]:
-        if w["start"] - current[-1]["end"] >= gap:
-            groups.append(current)
-            current = [w]
-        else:
-            current.append(w)
-    groups.append(current)
+    """Compute keep-ranges from the union of transcript gaps and audio
+    silences, clipped to word boundaries and shrunk by the edge pads.
+    Cuts smaller than min_cut are not worth the boundary risk."""
+    # Candidate cut regions: transcript gaps + head/tail dead air + silences.
+    regions: list[list[float]] = []
+    for a, b in zip(words, words[1:]):
+        if b["start"] - a["end"] >= gap:
+            regions.append([a["end"], b["start"]])
+    if words[0]["start"] > 0:
+        regions.append([0.0, words[0]["start"]])
+    if duration > words[-1]["end"]:
+        regions.append([words[-1]["end"], duration])
+    regions.extend([list(s) for s in silences or []])
 
-    segments = []
-    for g in groups:
-        start = max(0.0, g[0]["start"] - pad_before)
-        end = min(duration, g[-1]["end"] + pad_after)
-        segments.append({"start": start, "end": end, "words": g})
-
-    merged = [segments[0]]
-    for seg in segments[1:]:
-        if seg["start"] - merged[-1]["end"] < 0.12:
-            merged[-1]["end"] = seg["end"]
-            merged[-1]["words"].extend(seg["words"])
+    regions.sort()
+    merged: list[list[float]] = []
+    for r in regions:
+        if merged and r[0] <= merged[-1][1] + 1e-6:
+            merged[-1][1] = max(merged[-1][1], r[1])
         else:
-            merged.append(seg)
-    return merged
+            merged.append(list(r))
+
+    # Never cut inside a word: subtract every word span from the regions.
+    clipped: list[list[float]] = []
+    for r in merged:
+        pieces = [r]
+        for w in words:
+            if w["end"] <= r[0] or w["start"] >= r[1]:
+                continue
+            next_pieces = []
+            for p in pieces:
+                if w["end"] <= p[0] or w["start"] >= p[1]:
+                    next_pieces.append(p)
+                    continue
+                if p[0] < w["start"]:
+                    next_pieces.append([p[0], w["start"]])
+                if w["end"] < p[1]:
+                    next_pieces.append([w["end"], p[1]])
+            pieces = next_pieces
+        clipped.extend(pieces)
+    clipped.sort()
+
+    # Shrink by pads (keep air around speech) and drop slivers.
+    cuts: list[list[float]] = []
+    for s, e in clipped:
+        s2 = s if s <= 1e-6 else s + pad_after
+        e2 = e if e >= duration - 1e-6 else e - pad_before
+        if e2 - s2 >= min_cut:
+            cuts.append([s2, e2])
+
+    # Complement -> keep segments, then assign words.
+    segments: list[dict] = []
+    cursor = 0.0
+    for s, e in cuts + [[duration, duration]]:
+        if s - cursor > 1e-3:
+            segments.append({"start": cursor, "end": s, "words": []})
+        cursor = max(cursor, e)
+    for w in words:
+        mid = (w["start"] + w["end"]) / 2
+        for seg in segments:
+            if seg["start"] - 1e-6 <= mid <= seg["end"] + 1e-6:
+                seg["words"].append(w)
+                break
+    return segments
 
 
 def extract_segment(source: Path, start: float, end: float, out_path: Path, fps: float) -> None:
@@ -154,6 +255,10 @@ def main() -> None:
     ap.add_argument("--transcript", type=Path, required=True, help="Word-level transcript JSON")
     ap.add_argument("--edit-dir", type=Path, default=None, help="Output dir (default <video_parent>/edit)")
     ap.add_argument("--gap", type=float, default=0.5, help="Min silence (s) between words to cut (default 0.5)")
+    ap.add_argument("--noise-db", type=float, default=-32.0,
+                    help="silencedetect noise floor in dB (default -32)")
+    ap.add_argument("--no-silencedetect", action="store_true",
+                    help="Use transcript gaps only (skip ffmpeg silencedetect)")
     ap.add_argument("--pad-before", type=float, default=0.08, help="Padding before first word (default 0.08)")
     ap.add_argument("--pad-after", type=float, default=0.12, help="Padding after last word (default 0.12)")
     ap.add_argument("--remotion-public", type=Path, default=None,
@@ -174,11 +279,15 @@ def main() -> None:
     if not words:
         sys.exit("transcript has no words")
 
-    segments = build_segments(words, props["duration"], args.gap, args.pad_before, args.pad_after)
+    silences = [] if args.no_silencedetect else detect_silences(video, args.noise_db, args.gap)
+    words = repair_word_timestamps(words, silences)
+    segments = build_segments(words, props["duration"], args.gap, args.pad_before,
+                              args.pad_after, silences=silences)
 
     kept = sum(s["end"] - s["start"] for s in segments)
     removed = props["duration"] - kept
-    print(f"source: {props['duration']:.2f}s, {len(words)} words")
+    print(f"source: {props['duration']:.2f}s, {len(words)} words, "
+          f"{len(silences)} audio silence(s) >= {args.gap}s")
     print(f"keeping {len(segments)} segment(s), cutting {removed:.2f}s of silence "
           f"({removed / props['duration'] * 100:.0f}%)")
 
@@ -186,8 +295,9 @@ def main() -> None:
     clips_dir.mkdir(exist_ok=True)
     seg_paths: list[Path] = []
     for i, seg in enumerate(segments):
-        print(f"  [{i:02d}] {seg['start']:7.2f}-{seg['end']:7.2f}  ({seg['end'] - seg['start']:5.2f}s)  "
-              f"\"{seg['words'][0]['text']} … {seg['words'][-1]['text']}\"")
+        quote = (f"\"{seg['words'][0]['text']} … {seg['words'][-1]['text']}\""
+                 if seg["words"] else "(sem fala transcrita)")
+        print(f"  [{i:02d}] {seg['start']:7.2f}-{seg['end']:7.2f}  ({seg['end'] - seg['start']:5.2f}s)  {quote}")
         p = clips_dir / f"seg_{i:02d}.mp4"
         extract_segment(video, seg["start"], seg["end"], p, props["fps"])
         seg_paths.append(p)
