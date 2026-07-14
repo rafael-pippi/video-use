@@ -65,7 +65,7 @@ First-time install lives in `install.md` (clone, deps, ffmpeg, skill registratio
 - Node.js + npm available if the session needs HyperFrames or Remotion slots. HyperFrames currently requires Node.js 22+.
 - `yt-dlp`, HyperFrames, Remotion, Manim installed only on first use.
 - First-use animation setup happens inside the slot directory, never at the video-use repo root. HyperFrames can be invoked with `npx --yes hyperframes ...`; Remotion can be scaffolded with `npx create-video@latest` or installed as a project-local dependency before using its `remotion render` command.
-- This skill vendors `skills/manim-video/`. Read its SKILL.md when building a Manim slot.
+- This skill vendors `skills/manim-video/` (read its SKILL.md when building a Manim slot) and `skills/remotion-captions/` (read its SKILL.md for silence-cutting + animated word-level captions rendered with Remotion).
 
 Helpers (`helpers/transcribe.py`, `helpers/render.py`, etc.) live alongside this SKILL.md. Resolve their paths relative to the directory containing this file — the skill is typically symlinked at `~/.claude/skills/video-use/` or `~/.codex/skills/video-use/`.
 
@@ -193,6 +193,8 @@ Alignment=2,MarginV=35
 **`natural-sentence`** (if you invent this mode) — narrative, documentary, education. 4–7 word chunks, sentence case, break on natural pauses, `MarginV=60–80`, larger font for readability, slightly wider max-width. No shipped force_style — design one if you need it.
 
 Invent a third style if neither fits. Hard rules: subtitles LAST (Rule 1), output-timeline offsets (Rule 5).
+
+**Animated word-level captions (Remotion).** When the user wants "cut all the pauses + animated/interactive captions" (the short-form creator treatment), use the vendored `skills/remotion-captions/` skill instead of burned SRT. It ships six word-synced styles — one word at a time, 3-word pages, kinetic fly-in, keyword highlight in a contrast font, karaoke fill, boxed active word — plus a transcript-aware silence cutter (`helpers/cut_silences.py`) that remaps word timestamps to the output timeline, and a local whisper.cpp transcription fallback when no ElevenLabs key is available. Read its SKILL.md.
 
 ## Animations (when requested)
 

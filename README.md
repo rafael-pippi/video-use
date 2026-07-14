@@ -16,6 +16,7 @@ Try video-use in [Browser Use Cloud](https://cloud.browser-use.com/v4?utm_campai
 - **Auto color grades** every segment (warm cinematic, neutral punch, or any custom ffmpeg chain)
 - **30ms audio fades** at every cut so you never hear a pop
 - **Burns subtitles** in your style — 2-word UPPERCASE chunks by default, fully customizable
+- **Silence-cut + animated captions** via the vendored [`skills/remotion-captions/`](./skills/remotion-captions/) skill — removes every speech gap and renders word-synced Remotion captions in 6 styles (one-word pop, 3-word pages, kinetic fly-in, keyword highlight, karaoke fill, boxed active word), with a local whisper.cpp transcription fallback
 - **Generates animation overlays** via [HyperFrames](https://github.com/heygen-com/hyperframes), [Remotion](https://www.remotion.dev/), [Manim](https://www.manim.community/), or PIL — spawned in parallel sub-agents, one per animation
 - **Self-evaluates the rendered output** at every cut boundary before showing you anything
 - **Persists session memory** in `project.md` so next week's session picks up where you left off
