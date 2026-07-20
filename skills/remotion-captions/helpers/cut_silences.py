@@ -216,10 +216,22 @@ def build_segments(
     # Protection = word spans minus margin-shrunk carve silences. Never cut
     # inside actual speech; do allow cutting measured silence that whisper
     # tiled a word span across.
+    #
+    # Word-core rule: soft-spoken words (a whispered sign-off, a trailing
+    # syllable) can sit entirely below the permissive floor and read as
+    # "silence". Whisper transcribed a word there, so audio exists: if the
+    # carve holes would leave less than 0.12s of a word's span protected,
+    # keep that word's full span protected instead of trusting the carve.
     holes = [[s + carve_margin, e - carve_margin]
              for s, e in carve if (e - s) > 2 * carve_margin + 0.05]
-    protected = _subtract_intervals(
-        _merge_intervals([[w["start"], w["end"]] for w in words]), holes)
+    protected: list[list[float]] = []
+    for w in words:
+        pieces = _subtract_intervals([[w["start"], w["end"]]], holes)
+        if sum(e - s for s, e in pieces) < 0.12:
+            protected.append([w["start"], w["end"]])
+        else:
+            protected.extend(pieces)
+    protected = _merge_intervals(protected)
 
     clipped = sorted(_subtract_intervals(merged, protected))
 
