@@ -144,6 +144,38 @@ def repair_word_timestamps(words: list[dict], silences: list[list[float]]) -> li
     return repaired
 
 
+def _subtract_intervals(intervals: list[list[float]], holes: list[list[float]]) -> list[list[float]]:
+    """Interval-set subtraction: intervals minus holes. Both sorted [s, e] lists."""
+    out: list[list[float]] = []
+    for s, e in intervals:
+        pieces = [[s, e]]
+        for hs, he in holes:
+            if he <= s or hs >= e:
+                continue
+            next_pieces: list[list[float]] = []
+            for ps, pe in pieces:
+                if he <= ps or hs >= pe:
+                    next_pieces.append([ps, pe])
+                    continue
+                if ps < hs:
+                    next_pieces.append([ps, hs])
+                if he < pe:
+                    next_pieces.append([he, pe])
+            pieces = next_pieces
+        out.extend(pieces)
+    return out
+
+
+def _merge_intervals(intervals: list[list[float]]) -> list[list[float]]:
+    merged: list[list[float]] = []
+    for r in sorted(intervals):
+        if merged and r[0] <= merged[-1][1] + 1e-6:
+            merged[-1][1] = max(merged[-1][1], r[1])
+        else:
+            merged.append(list(r))
+    return merged
+
+
 def build_segments(
     words: list[dict],
     duration: float,
@@ -151,12 +183,24 @@ def build_segments(
     pad_before: float,
     pad_after: float,
     silences: list[list[float]] | None = None,
+    carve: list[list[float]] | None = None,
     min_cut: float = 0.2,
+    carve_margin: float = 0.12,
 ) -> list[dict]:
     """Compute keep-ranges from the union of transcript gaps and audio
     silences, clipped to word boundaries and shrunk by the edge pads.
-    Cuts smaller than min_cut are not worth the boundary risk."""
-    # Candidate cut regions: transcript gaps + head/tail dead air + silences.
+
+    `carve` (permissive-threshold silences) punches holes in the word-span
+    protection: whisper.cpp stretches a word's timestamps across real pauses,
+    and without carving those pauses are unremovable. Each carve interval is
+    shrunk by carve_margin on both sides before it weakens protection, so a
+    quiet word tail is never clipped. Cuts smaller than min_cut are not worth
+    the boundary risk."""
+    silences = silences or []
+    carve = carve or []
+
+    # Candidate cut regions: transcript gaps + head/tail dead air + audio
+    # silences (strict), + permissive silences long enough to qualify as gaps.
     regions: list[list[float]] = []
     for a, b in zip(words, words[1:]):
         if b["start"] - a["end"] >= gap:
@@ -165,35 +209,31 @@ def build_segments(
         regions.append([0.0, words[0]["start"]])
     if duration > words[-1]["end"]:
         regions.append([words[-1]["end"], duration])
-    regions.extend([list(s) for s in silences or []])
+    regions.extend([list(s) for s in silences])
+    regions.extend([list(c) for c in carve if c[1] - c[0] >= gap])
+    merged = _merge_intervals(regions)
 
-    regions.sort()
-    merged: list[list[float]] = []
-    for r in regions:
-        if merged and r[0] <= merged[-1][1] + 1e-6:
-            merged[-1][1] = max(merged[-1][1], r[1])
+    # Protection = word spans minus margin-shrunk carve silences. Never cut
+    # inside actual speech; do allow cutting measured silence that whisper
+    # tiled a word span across.
+    #
+    # Word-core rule: soft-spoken words (a whispered sign-off, a trailing
+    # syllable) can sit entirely below the permissive floor and read as
+    # "silence". Whisper transcribed a word there, so audio exists: if the
+    # carve holes would leave less than 0.12s of a word's span protected,
+    # keep that word's full span protected instead of trusting the carve.
+    holes = [[s + carve_margin, e - carve_margin]
+             for s, e in carve if (e - s) > 2 * carve_margin + 0.05]
+    protected: list[list[float]] = []
+    for w in words:
+        pieces = _subtract_intervals([[w["start"], w["end"]]], holes)
+        if sum(e - s for s, e in pieces) < 0.12:
+            protected.append([w["start"], w["end"]])
         else:
-            merged.append(list(r))
+            protected.extend(pieces)
+    protected = _merge_intervals(protected)
 
-    # Never cut inside a word: subtract every word span from the regions.
-    clipped: list[list[float]] = []
-    for r in merged:
-        pieces = [r]
-        for w in words:
-            if w["end"] <= r[0] or w["start"] >= r[1]:
-                continue
-            next_pieces = []
-            for p in pieces:
-                if w["end"] <= p[0] or w["start"] >= p[1]:
-                    next_pieces.append(p)
-                    continue
-                if p[0] < w["start"]:
-                    next_pieces.append([p[0], w["start"]])
-                if w["end"] < p[1]:
-                    next_pieces.append([w["end"], p[1]])
-            pieces = next_pieces
-        clipped.extend(pieces)
-    clipped.sort()
+    clipped = sorted(_subtract_intervals(merged, protected))
 
     # Shrink by pads (keep air around speech) and drop slivers.
     cuts: list[list[float]] = []
@@ -203,7 +243,8 @@ def build_segments(
         if e2 - s2 >= min_cut:
             cuts.append([s2, e2])
 
-    # Complement -> keep segments, then assign words.
+    # Complement -> keep segments, then assign words (midpoint, falling back
+    # to max overlap for words whose span straddles a carved cut).
     segments: list[dict] = []
     cursor = 0.0
     for s, e in cuts + [[duration, duration]]:
@@ -212,10 +253,15 @@ def build_segments(
         cursor = max(cursor, e)
     for w in words:
         mid = (w["start"] + w["end"]) / 2
+        home = None
         for seg in segments:
             if seg["start"] - 1e-6 <= mid <= seg["end"] + 1e-6:
-                seg["words"].append(w)
+                home = seg
                 break
+        if home is None and segments:
+            home = max(segments, key=lambda s: min(s["end"], w["end"]) - max(s["start"], w["start"]))
+        if home is not None:
+            home["words"].append(w)
     return segments
 
 
@@ -257,6 +303,11 @@ def main() -> None:
     ap.add_argument("--gap", type=float, default=0.5, help="Min silence (s) between words to cut (default 0.5)")
     ap.add_argument("--noise-db", type=float, default=-32.0,
                     help="silencedetect noise floor in dB (default -32)")
+    ap.add_argument("--carve-db", type=float, default=None,
+                    help="Permissive noise floor for carving pauses out of stretched "
+                         "word spans (default noise_db + 6)")
+    ap.add_argument("--no-carve", action="store_true",
+                    help="Disable stretched-word pause carving")
     ap.add_argument("--no-silencedetect", action="store_true",
                     help="Use transcript gaps only (skip ffmpeg silencedetect)")
     ap.add_argument("--pad-before", type=float, default=0.08, help="Padding before first word (default 0.08)")
@@ -281,13 +332,17 @@ def main() -> None:
 
     silences = [] if args.no_silencedetect else detect_silences(video, args.noise_db, args.gap)
     words = repair_word_timestamps(words, silences)
+    carve_db = args.carve_db if args.carve_db is not None else args.noise_db + 6
+    carve = ([] if (args.no_silencedetect or args.no_carve)
+             else detect_silences(video, carve_db, 0.4))
     segments = build_segments(words, props["duration"], args.gap, args.pad_before,
-                              args.pad_after, silences=silences)
+                              args.pad_after, silences=silences, carve=carve)
 
     kept = sum(s["end"] - s["start"] for s in segments)
     removed = props["duration"] - kept
     print(f"source: {props['duration']:.2f}s, {len(words)} words, "
-          f"{len(silences)} audio silence(s) >= {args.gap}s")
+          f"{len(silences)} audio silence(s) >= {args.gap}s, "
+          f"{len(carve)} carve silence(s) @ {carve_db:g}dB")
     print(f"keeping {len(segments)} segment(s), cutting {removed:.2f}s of silence "
           f"({removed / props['duration'] * 100:.0f}%)")
 

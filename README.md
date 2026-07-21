@@ -17,6 +17,7 @@ Try video-use in [Browser Use Cloud](https://cloud.browser-use.com/v4?utm_campai
 - **30ms audio fades** at every cut so you never hear a pop
 - **Burns subtitles** in your style — 2-word UPPERCASE chunks by default, fully customizable
 - **Silence-cut + animated captions** via the vendored [`skills/remotion-captions/`](./skills/remotion-captions/) skill — removes every speech gap and renders word-synced Remotion captions in 6 styles (one-word pop, 3-word pages, kinetic fly-in, keyword highlight, karaoke fill, boxed active word), with a local whisper.cpp transcription fallback
+- **Half-screen 9:16 shorts** via the vendored [`skills/video-editor-shorts/`](./skills/video-editor-shorts/) skill — the Reels/TikTok format: speaker face-crop on the bottom half, synced muted b-rolls on top, aggressive silence cuts, burned ≤2-word captions, textual hook in the first 3s; self-contained transcription, face-detect smart crop, `.ass` caption generation, bundled Montserrat fonts + a curated SFX pack
 - **Generates animation overlays** via [HyperFrames](https://github.com/heygen-com/hyperframes), [Remotion](https://www.remotion.dev/), [Manim](https://www.manim.community/), or PIL — spawned in parallel sub-agents, one per animation
 - **Self-evaluates the rendered output** at every cut boundary before showing you anything
 - **Persists session memory** in `project.md` so next week's session picks up where you left off

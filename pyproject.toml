@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 animations = ["manim"]
+shorts = ["opencv-python-headless"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
