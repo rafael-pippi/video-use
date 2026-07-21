@@ -65,7 +65,7 @@ First-time install lives in `install.md` (clone, deps, ffmpeg, skill registratio
 - Node.js + npm available if the session needs HyperFrames or Remotion slots. HyperFrames currently requires Node.js 22+.
 - `yt-dlp`, HyperFrames, Remotion, Manim installed only on first use.
 - First-use animation setup happens inside the slot directory, never at the video-use repo root. HyperFrames can be invoked with `npx --yes hyperframes ...`; Remotion can be scaffolded with `npx create-video@latest` or installed as a project-local dependency before using its `remotion render` command.
-- This skill vendors `skills/manim-video/` (read its SKILL.md when building a Manim slot) and `skills/remotion-captions/` (read its SKILL.md for silence-cutting + animated word-level captions rendered with Remotion).
+- This skill vendors `skills/manim-video/` (read its SKILL.md when building a Manim slot), `skills/remotion-captions/` (read its SKILL.md for silence-cutting + animated word-level captions rendered with Remotion), and `skills/video-editor-shorts/` (read its SKILL.md for the half-screen 9:16 Reels/TikTok format — speaker face-crop on the bottom, synced muted b-rolls on top, burned ≤2-word captions, hook in the first 3s; self-contained helpers for ElevenLabs transcription, face-detect smart crop, and .ass caption generation, with bundled fonts + SFX).
 
 Helpers (`helpers/transcribe.py`, `helpers/render.py`, etc.) live alongside this SKILL.md. Resolve their paths relative to the directory containing this file — the skill is typically symlinked at `~/.claude/skills/video-use/` or `~/.codex/skills/video-use/`.
 
